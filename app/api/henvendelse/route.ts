@@ -1,30 +1,10 @@
-// app/api/henvendelse/route.ts
+// app/api/henvendelse/route.ts – med Supabase database
 
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
+import { supabase } from "@/lib/supabase";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-export interface Henvendelse {
-  id: string;
-  navn: string;
-  epost: string;
-  telefon: string;
-  melding: string;
-  boligAdresse: string;
-  boligId: string;
-  tidspunkt: string;
-  status: "ny" | "behandlet";
-}
-
-// Global variabel som overlever hot-reloads i development
-declare global {
-  var _henvendelser: Henvendelse[] | undefined;
-}
-if (!global._henvendelser) {
-  global._henvendelser = [];
-}
-const henvendelser = global._henvendelser;
 
 async function callGPT(system: string, user: string): Promise<string> {
   const r = await openai.chat.completions.create({
@@ -38,6 +18,7 @@ async function callGPT(system: string, user: string): Promise<string> {
   return r.choices[0].message.content ?? "";
 }
 
+// POST – kunde sender henvendelse
 export async function POST(req: NextRequest) {
   const body = await req.json();
   const { navn, epost, telefon, melding, boligAdresse, boligId } = body;
@@ -46,25 +27,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Mangler navn, e-post eller boligadresse" }, { status: 400 });
   }
 
-  const henvendelse: Henvendelse = {
-    id: `h-${Date.now()}`,
-    navn,
-    epost,
-    telefon: telefon ?? "",
-    melding: melding ?? "",
-    boligAdresse,
-    boligId: boligId ?? "ukjent",
-    tidspunkt: new Date().toISOString(),
-    status: "ny",
-  };
-  henvendelser.push(henvendelse);
+  // Lagre i Supabase
+  const { data, error } = await supabase
+    .from("henvendelser")
+    .insert({
+      navn,
+      epost,
+      telefon: telefon ?? "",
+      melding: melding ?? "",
+      bolig_adresse: boligAdresse,
+      bolig_id: boligId ?? "ukjent",
+      status: "ny",
+    })
+    .select()
+    .single();
 
+  if (error) {
+    console.error("Supabase feil:", error);
+    return NextResponse.json({ error: "Kunne ikke lagre henvendelse" }, { status: 500 });
+  }
+
+  // Chief of Staff analyserer
   const analyse = await callGPT(
     `Du er Chief of Staff for en eiendomsmegler. En potensiell kjøper har meldt interesse.
 Lag to ting i JSON (ingen markdown):
 {
   "bekreftelse": "hyggelig bekreftelse til kunden på norsk (2-3 setninger, fortell at megler tar kontakt innen 24 timer)",
-  "meglerMelding": "kort intern melding til megler om denne henvendelsen med prioritetsanbefaling"
+  "meglerMelding": "kort intern melding til megler om henvendelsen med prioritetsanbefaling"
 }`,
     `Kunde: ${navn} (${epost}, tlf: ${telefon})
 Bolig: ${boligAdresse}
@@ -80,21 +69,51 @@ Melding: ${melding || "Ingen melding – ønsker å melde interesse"}`
 
   return NextResponse.json({
     success: true,
-    henvendelseId: henvendelse.id,
+    henvendelseId: data.id,
     bekreftelse: cosResultat.bekreftelse,
   });
 }
 
+// GET – dashboard henter alle henvendelser
 export async function GET() {
-  const sorted = [...henvendelser].sort(
-    (a, b) => new Date(b.tidspunkt).getTime() - new Date(a.tidspunkt).getTime()
-  );
-  return NextResponse.json({ henvendelser: sorted, total: sorted.length });
+  const { data, error } = await supabase
+    .from("henvendelser")
+    .select("*")
+    .order("tidspunkt", { ascending: false });
+
+  if (error) {
+    console.error("Supabase feil:", error);
+    return NextResponse.json({ error: "Kunne ikke hente henvendelser" }, { status: 500 });
+  }
+
+  // Map snake_case til camelCase for frontend
+  const henvendelser = (data ?? []).map((h) => ({
+    id: h.id,
+    navn: h.navn,
+    epost: h.epost,
+    telefon: h.telefon,
+    melding: h.melding,
+    boligAdresse: h.bolig_adresse,
+    boligId: h.bolig_id,
+    tidspunkt: h.tidspunkt,
+    status: h.status,
+  }));
+
+  return NextResponse.json({ henvendelser, total: henvendelser.length });
 }
 
+// PATCH – megler markerer som behandlet
 export async function PATCH(req: NextRequest) {
   const { id } = await req.json();
-  const h = henvendelser.find((x) => x.id === id);
-  if (h) h.status = "behandlet";
+
+  const { error } = await supabase
+    .from("henvendelser")
+    .update({ status: "behandlet" })
+    .eq("id", id);
+
+  if (error) {
+    return NextResponse.json({ error: "Kunne ikke oppdatere" }, { status: 500 });
+  }
+
   return NextResponse.json({ success: true });
 }
