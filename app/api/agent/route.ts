@@ -3,7 +3,7 @@
 import OpenAI from "openai";
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { authOptions } from "@/lib/auth";
 import { getGmailClient, getCalendarClient } from "@/lib/google";
 
 function getNextDateForDay(dayName: string, time: string): string {

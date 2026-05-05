@@ -27,13 +27,18 @@ export default function Dashboard() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [leadsMessage, setLeadsMessage] = useState("");
   const [henvendelser, setHenvendelser] = useState<any[]>([]);
+  const [boliger, setBoliger] = useState<any[]>([]);
+  const [loadingBoliger, setLoadingBoliger] = useState(false);
+  const [visNyBolig, setVisNyBolig] = useState(false);
+  const [nyBolig, setNyBolig] = useState({ adresse: "", pris: "", storrelse: "", rom: "", etasje: "", byggeaar: "", beskrivelse: "", visningsdatoer: "" });
+  const [lagrerBolig, setLagrerBolig] = useState(false);
   const [loadingHenvendelser, setLoadingHenvendelser] = useState(false);
   const [loadingLeads, setLoadingLeads] = useState(false);
 
   const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<"agent" | "leads" | "kalender" | "henvendelser">("agent");
+  const [activeTab, setActiveTab] = useState<"agent" | "leads" | "kalender" | "henvendelser" | "boliger">("agent");
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
@@ -72,6 +77,43 @@ export default function Dashboard() {
     setLoadingEvents(false);
   }
 
+  async function fetchBoliger() {
+    setLoadingBoliger(true);
+    try {
+      const res = await fetch("/api/boliger");
+      const data = await res.json();
+      setBoliger(data.boliger ?? []);
+    } catch { }
+    setLoadingBoliger(false);
+  }
+
+  async function leggTilBolig() {
+    if (!nyBolig.adresse || !nyBolig.pris) return;
+    setLagrerBolig(true);
+    try {
+      const res = await fetch("/api/boliger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...nyBolig,
+          visningsdatoer: nyBolig.visningsdatoer ? nyBolig.visningsdatoer.split("\n").filter(Boolean) : [],
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setVisNyBolig(false);
+        setNyBolig({ adresse: "", pris: "", storrelse: "", rom: "", etasje: "", byggeaar: "", beskrivelse: "", visningsdatoer: "" });
+        fetchBoliger();
+      }
+    } catch { }
+    setLagrerBolig(false);
+  }
+
+  async function slettBolig(id: string) {
+    await fetch("/api/boliger", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+    fetchBoliger();
+  }
+
   async function fetchHenvendelser() {
     setLoadingHenvendelser(true);
     try {
@@ -91,6 +133,7 @@ export default function Dashboard() {
     if (activeTab === "leads") fetchLeads();
     if (activeTab === "kalender") fetchEvents();
     if (activeTab === "henvendelser") fetchHenvendelser();
+    if (activeTab === "boliger") fetchBoliger();
   }, [activeTab]);
 
   async function runAgent() {
@@ -137,13 +180,13 @@ export default function Dashboard() {
 
         {/* Tabs */}
         <div style={styles.tabs}>
-          {(["agent", "leads", "kalender", "henvendelser"] as const).map((tab) => (
+          {(["agent", "leads", "kalender", "henvendelser", "boliger"] as const).map((tab) => (
             <button
               key={tab}
               style={{ ...styles.tab, ...(activeTab === tab ? styles.tabActive : {}) }}
               onClick={() => setActiveTab(tab as any)}
             >
-              {tab === "agent" ? "🤖 Agent" : tab === "leads" ? "📥 Finn.no Leads" : tab === "kalender" ? "📅 Kalender" : "🔔 Henvendelser"}
+              {tab === "agent" ? "🤖 Agent" : tab === "leads" ? "📥 Finn.no Leads" : tab === "kalender" ? "📅 Kalender" : tab === "henvendelser" ? "🔔 Henvendelser" : "🏠 Boliger"}
             </button>
           ))}
         </div>
@@ -277,7 +320,104 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Henvendelser Tab */}
+        {/* Boliger Tab */}
+      {activeTab === ("boliger" as any) && (
+        <div style={styles.card}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <h2 style={styles.cardTitle}>🏠 Boliger til salgs</h2>
+            <div style={{ display: "flex", gap: 8 }}>
+              <a href="/boliger" target="_blank" style={{ ...styles.refreshBtn, textDecoration: "none" }}>Se kundeside →</a>
+              <button style={styles.refreshBtn} onClick={() => setVisNyBolig(!visNyBolig)}>+ Legg til bolig</button>
+            </div>
+          </div>
+
+          {visNyBolig && (
+            <div style={{ background: "#F8F7F4", borderRadius: 10, padding: 20, marginBottom: 20 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Ny bolig</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                {[
+                  { key: "adresse", label: "Adresse *", placeholder: "Storgata 12, Oslo" },
+                  { key: "pris", label: "Pris *", placeholder: "3 200 000" },
+                  { key: "storrelse", label: "Størrelse", placeholder: "65 m²" },
+                  { key: "rom", label: "Type", placeholder: "3-roms" },
+                  { key: "etasje", label: "Etasje", placeholder: "3. etasje" },
+                  { key: "byggeaar", label: "Byggeår", placeholder: "1985" },
+                ].map(({ key, label, placeholder }) => (
+                  <div key={key}>
+                    <label style={{ display: "block", fontSize: 12, color: "#666", marginBottom: 4 }}>{label}</label>
+                    <input
+                      placeholder={placeholder}
+                      value={nyBolig[key as keyof typeof nyBolig]}
+                      onChange={(e) => setNyBolig({ ...nyBolig, [key]: e.target.value })}
+                      style={{ width: "100%", padding: "8px 10px", border: "1px solid #E5E5E0", borderRadius: 6, fontSize: 13, boxSizing: "border-box" as const, fontFamily: "Georgia, serif" }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: "block", fontSize: 12, color: "#666", marginBottom: 4 }}>Beskrivelse</label>
+                <textarea
+                  placeholder="Beskriv boligen..."
+                  value={nyBolig.beskrivelse}
+                  onChange={(e) => setNyBolig({ ...nyBolig, beskrivelse: e.target.value })}
+                  rows={3}
+                  style={{ width: "100%", padding: "8px 10px", border: "1px solid #E5E5E0", borderRadius: 6, fontSize: 13, boxSizing: "border-box" as const, fontFamily: "Georgia, serif", resize: "vertical" as const }}
+                />
+              </div>
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ display: "block", fontSize: 12, color: "#666", marginBottom: 4 }}>Visningsdatoer (én per linje)</label>
+                <textarea
+                  placeholder={"Lørdag 10. mai kl. 12:00–13:00\nSøndag 11. mai kl. 14:00–15:00"}
+                  value={nyBolig.visningsdatoer}
+                  onChange={(e) => setNyBolig({ ...nyBolig, visningsdatoer: e.target.value })}
+                  rows={2}
+                  style={{ width: "100%", padding: "8px 10px", border: "1px solid #E5E5E0", borderRadius: 6, fontSize: 13, boxSizing: "border-box" as const, fontFamily: "Georgia, serif", resize: "vertical" as const }}
+                />
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={leggTilBolig}
+                  disabled={lagrerBolig || !nyBolig.adresse || !nyBolig.pris}
+                  style={{ padding: "10px 20px", background: "#1a1a1a", color: "#fff", border: "none", borderRadius: 8, fontSize: 13, cursor: "pointer", fontFamily: "Georgia, serif" }}
+                >
+                  {lagrerBolig ? "Lagrer..." : "Lagre bolig"}
+                </button>
+                <button onClick={() => setVisNyBolig(false)} style={{ padding: "10px 20px", background: "transparent", border: "1px solid #E5E5E0", borderRadius: 8, fontSize: 13, cursor: "pointer" }}>
+                  Avbryt
+                </button>
+              </div>
+            </div>
+          )}
+
+          {loadingBoliger ? (
+            <p style={styles.muted}>Henter boliger...</p>
+          ) : boliger.length === 0 ? (
+            <p style={styles.muted}>Ingen boliger lagt til ennå. Klikk "+ Legg til bolig".</p>
+          ) : (
+            boliger.map((b: any) => (
+              <div key={b.id} style={{ ...styles.leadCard, background: "#F8F7F4", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{b.adresse}</div>
+                  <div style={styles.leadDetail}>kr {b.pris},- · {b.rom} · {b.storrelse}</div>
+                  <div style={styles.leadDetail}>
+                    <a href={`/bolig/${b.slug}`} target="_blank" style={{ color: "#0C447C", fontSize: 12 }}>
+                      /bolig/{b.slug} →
+                    </a>
+                  </div>
+                </div>
+                <button
+                  onClick={() => slettBolig(b.id)}
+                  style={{ fontSize: 12, padding: "5px 12px", border: "1px solid #FECACA", borderRadius: 8, background: "#FEF2F2", color: "#991B1B", cursor: "pointer" }}
+                >
+                  Slett
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Henvendelser Tab */}
       {activeTab === ("henvendelser" as any) && (
         <div style={styles.card}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
